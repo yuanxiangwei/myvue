@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+	</head>
+	<body>
+		<div id='app'>
+			<h2>{{title}}</h2>
+			<input v-model="name">
+			<h1>{{name}}</h1>
+			<button v-on:click="clickMe">click me!</button>
+			<p>aaaa{{xxx}}zzzz</p>
+		</div>
+		<script src="./index.js" type="text/javascript" charset="utf-8"></script>
+		<script type="text/javascript">
+			function Compile(el, vm) {
+				this.vm = vm;
+				this.el = document.querySelector(el)
+
+				this.fragment = null
+				this.init()
+			}
+			Compile.prototype = {
+				init: function() {
+					if(this.el) {
+						this.fragment = this.nodeToFragment(this.el); //获取dom节点的fragment碎片
+						//（虚拟节点对象  更安全的改变文档的结构和安全 且不会每次对dom操作都会重新渲染）
+						this.compileElement(this.fragment) //解析dom结构
+						this.el.appendChild(this.fragment)
+					} else {
+						console.log("Dom元素不存在")
+					}
+				},
+				nodeToFragment: function(el) {
+					let fragment = document.createDocumentFragment();
+
+					let child = el.firstChild;
+
+					while(child) {
+						fragment.appendChild(child);
+						child = el.firstChild
+					}
+					return fragment
+				},
+				compileElement: function(el) {
+					let childNodes = el.childNodes;
+					[].slice.call(childNodes).forEach(node => {
+						let reg = /\{\{(.*)\}\}/;
+						let text = node.textContent;
+
+						if(this.isElementNode(node)) { //判断节点内容是否为dom节点
+							this.compile(node) //对dom节点进行解析
+						} else if(this.isTextNode(node) && reg.test(text)) { //文本节点
+							this.compileText(node, reg.exec(text)[1])
+						}
+						if(node.childNodes && node.childNodes.length) {
+							this.compileElement(node); // 继续递归遍历子节点
+						}
+					})
+				},
+				compile: function(node) {
+					let nodeAttrs = node.attributes;
+					let self = this
+					Array.prototype.forEach.call(nodeAttrs, function(attr) {
+						let attrName = attr.name;
+						if(self.isDirective(attrName)) { //是否为自定义属性
+							let exp = attr.value;
+							let dir = attrName.substring(2);
+							if(self.isEventDirective(dir)) { //是否为事件指令
+
+								self.compileEvent(node, self.vm, exp, dir)
+							} else { //v-model指令
+								self.compileModel(node, self.vm, exp, dir)
+							}
+							node.removeAttribute(attrName)
+						}
+					})
+				},
+				compileText: function(node, exp) {
+					let initText = this.vm[exp];
+					this.updateText(node, initText); //初始化的数据放到初始化的地图
+					new Watcher(this.vm, exp, (value) => {
+						this.updateText(node, value)
+					})
+				},
+				updateText: function(node, text) {
+					node.textContent = typeof text === 'undefined' ? '' : text
+				},
+				isDirective: function(attr) { //判断是否为v-开头的自定义指令
+					return attr.indexOf('v-') === 0
+				},
+				isEventDirective: function(dir) { //判断是否为on开头的事件节点
+					return dir.indexOf('on:') === 0
+				},
+				compileEvent: function(node, vm, exp, dir) { //事件指令     为对应dom设置监听事件
+					let eventType = dir.split(':')[1];
+					let cb = vm.methods && vm.methods[exp];
+
+					if(eventType && cb) {
+
+						node.addEventListener(eventType, cb.bind(vm), false)
+					}
+				},
+				compileModel: function(node, vm, exp, dir) {
+					let val = this.vm[exp];
+					let self = this
+					this.modelUpdater(node, val)
+					new Watcher(this.vm, exp, function(value) { //添加watcher  数据发生变化时通过dep调用所添加的所有watcher update方法并执行此回调
+						self.modelUpdater(node, value)
+					})
+					node.addEventListener('input', (e) => { //绑定input事件  
+						let newValue = e.target.value
+						if(val === newValue) return
+						self.vm[exp] = newValue
+						val = newValue
+					})
+				},
+				modelUpdater: function(node, val) { //绑定v-model的设置dom节点的value值
+					node.value = typeof val === 'undifined' ? '' : val
+				},
+				isElementNode: function(node) {
+					return node.nodeType === 1
+				},
+				isTextNode: function(node) {
+					return node.nodeType === 3
+				}
+			}
+
+			function SelfVue(options) {
+				let self = this;
+				this.vm = this;
+				this.data = options.data;
+				this.methods = options.methods;
+				Object.keys(this.data).forEach(function(key) {
+					self.proxyKeys(key)
+				})
+				observe(this.data);
+				new Compile(options.el, this.vm)
+				options.mounted.call(this);
+				return this
+			}
+			SelfVue.prototype = {
+				proxyKeys: function(key) {
+					var self = this;
+					Object.defineProperty(this, key, {
+						enumerable: false,
+						configurable: true,
+						get: function proxyGetter() {
+							return self.data[key];
+						},
+						set: function proxySetter(newVal) {
+							self.data[key] = newVal;
+						}
+					});
+				}
+			}
+			var selfVue = new SelfVue({
+				el: '#app',
+				data: {
+					title: 'hello world',
+					name: 'name',
+					xxx: ''
+				},
+				methods: {
+					clickMe: function() {
+						this.title =this.title+ '1 ';
+					}
+				},
+				mounted: function() {
+					window.setTimeout(() => {
+						this.title = '你好mounted';
+					}, 2000);
+				}
+			});
+		</script>
+	</body>
+
+</html>
